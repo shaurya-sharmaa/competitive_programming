@@ -1,85 +1,124 @@
-#include <iostream>
-#include <vector>
-#include <unordered_map>
-#include <utility>
-#include <random>
+#include <algorithm>
 #include <chrono>
+#include <iostream>
+#include <random>
+#include <string>
+#include <utility>
+#include <vector>
+
 using namespace std;
-
-using ull = unsigned long long;
-using Hash = pair<ull, ull>;
-
-struct PairHash {
-    size_t operator()(const Hash& p) const {
-        ull x = p.first;
-        ull y = p.second;
-        x ^= y + 0x9e3779b97f4a7c15ULL + (x << 6) + (x >> 2);
-        return static_cast<size_t>(x);
-    }
-};
 
 int main() {
     ios::sync_with_stdio(false);
     cin.tie(nullptr);
 
-    mt19937_64 rng(
-        chrono::steady_clock::now().time_since_epoch().count()
-    );
+    mt19937_64 rng(static_cast<unsigned long long>(chrono::steady_clock::now().time_since_epoch().count()));
+    const int INF = 1e9;
 
-    int t;
-    cin >> t;
+    int testCases;
+    cin >> testCases;
 
-    while (t--) {
-        int n, m;
-        cin >> n >> m;
+    while (testCases--) {
+        int nodeCount, edgeCount;
+        cin >> nodeCount >> edgeCount;
 
-        vector<Hash> events(n + 2, {0, 0});
-
-        for (int i = 0; i < m; i++) {
-            int l, r;
-            cin >> l >> r;
-
-            ull x = rng();
-            ull y = rng();
-
-            events[l].first ^= x;
-            events[l].second ^= y;
-            events[r + 1].first ^= x;
-            events[r + 1].second ^= y;
+        vector<unsigned long long> xorPrefix(nodeCount + 2, 0);
+        for (int index = 0; index < edgeCount; ++index) {
+            int left, right;
+            cin >> left >> right;
+            unsigned long long randomHash = rng();
+            xorPrefix[left] ^= randomHash;
+            xorPrefix[right + 1] ^= randomHash;
         }
 
-        unordered_map<Hash, vector<int>, PairHash> groups;
-        groups.reserve(2 * n);
-
-        Hash current = {0, 0};
-
-        for (int i = 1; i <= n; i++) {
-            current.first ^= events[i].first;
-            current.second ^= events[i].second;
-            groups[current].push_back(i);
+        vector<pair<unsigned long long, int>> valueByPosition(nodeCount);
+        unsigned long long currentXor = 0;
+        for (int position = 1; position <= nodeCount; ++position) {
+            currentXor ^= xorPrefix[position];
+            valueByPosition[position - 1] = {currentXor, position};
         }
 
-        vector<pair<int, int>> answer;
-        answer.reserve(n / 2 + 1);
+        sort(valueByPosition.begin(), valueByPosition.end());
 
-        for (const auto& entry : groups) {
-            const vector<int>& positions = entry.second;
-            int sz = static_cast<int>(positions.size());
-            int k = (sz + 1) / 2;
+        vector<int> bestRangeEnd(nodeCount + 2, INF), maxRightIndex(nodeCount + 2, 0);
+        for (int index = 0; index < nodeCount;) {
+            int rightIndex = index;
+            while (rightIndex + 1 < nodeCount && valueByPosition[rightIndex + 1].first == valueByPosition[index].first) {
+                ++rightIndex;
+            }
 
-            for (int j = 0; j < k; j++) {
-                answer.push_back({
-                    positions[j],
-                    positions[j + k - 1]
-                });
+            if (rightIndex > index) {
+                for (int k = index; k < rightIndex; ++k) {
+                    int left = valueByPosition[k].second;
+                    int right = valueByPosition[k + 1].second - 1;
+                    bestRangeEnd[left] = min(bestRangeEnd[left], right);
+                }
+                maxRightIndex[valueByPosition[index].second] = max(maxRightIndex[valueByPosition[index].second], valueByPosition[rightIndex].second);
+            }
+            index = rightIndex + 1;
+        }
+
+        vector<int> nextSegmentEnd(nodeCount + 2, INF), dp(nodeCount + 2, 0), segmentEnd(nodeCount + 2, 0), prefixMax(nodeCount + 2, 0);
+        for (int position = nodeCount - 1; position >= 0; --position) {
+            nextSegmentEnd[position] = min(nextSegmentEnd[position + 1], bestRangeEnd[position + 1]);
+        }
+        for (int position = nodeCount; position >= 0; --position) {
+            if (nextSegmentEnd[position] == INF) {
+                dp[position] = 0;
+                segmentEnd[position] = position;
+            } else {
+                dp[position] = 1 + dp[nextSegmentEnd[position]];
+                segmentEnd[position] = segmentEnd[nextSegmentEnd[position]];
             }
         }
 
-        cout << answer.size() << '\n';
-
-        for (const auto& [l, r] : answer) {
-            cout << l << ' ' << r << '\n';
+        for (int position = 1; position <= nodeCount; ++position) {
+            prefixMax[position] = max(prefixMax[position - 1], maxRightIndex[position]);
         }
+
+        int currentDepth = dp[0];
+        if (currentDepth == 0) {
+            cout << 0 << '\n';
+            continue;
+        }
+
+        vector<int> selectedPoints;
+        bool foundSolution = false;
+        if (currentDepth % 2 == 0) {
+            int rightMin = nextSegmentEnd[0];
+            for (int position = 1; position <= rightMin && !foundSolution; ++position) {
+                if (1 + dp[position] == currentDepth && segmentEnd[position] >= prefixMax[position]) {
+                    int currentPoint = position;
+                    selectedPoints.push_back(currentPoint);
+                    while (nextSegmentEnd[currentPoint] != INF) {
+                        currentPoint = nextSegmentEnd[currentPoint];
+                        selectedPoints.push_back(currentPoint);
+                    }
+                    foundSolution = true;
+                }
+            }
+        }
+
+        if (!foundSolution) {
+            int currentPoint = 0;
+            while (nextSegmentEnd[currentPoint] != INF) {
+                currentPoint = nextSegmentEnd[currentPoint];
+                selectedPoints.push_back(currentPoint);
+            }
+            selectedPoints.push_back(0);
+            if (currentDepth % 2 == 0) {
+                selectedPoints.push_back(nodeCount);
+            }
+        }
+
+        sort(selectedPoints.begin(), selectedPoints.end());
+        int pairCount = selectedPoints.size() / 2;
+        string output = to_string(pairCount) + '\n';
+        for (int index = 0; index < pairCount; ++index) {
+            output += to_string(selectedPoints[index] + 1) + " " + to_string(selectedPoints[index + pairCount]) + '\n';
+        }
+
+        cout << output;
     }
 
     return 0;
